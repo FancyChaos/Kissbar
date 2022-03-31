@@ -12,6 +12,7 @@ The delimiter is a simple string which will be formatted in between the differen
 
 ## Installation
 > make
+
 > doas make install
 
 ## Thanks
