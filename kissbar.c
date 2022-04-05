@@ -19,13 +19,14 @@ void getstatus(Element *element)
         }
 
         // Get return value of the script/command
-        fgets(element->status, SSIZE, status_cmd);
+        if(fgets(element->status, SSIZE, status_cmd) == NULL)
+                element->status[0] = '\0';
 
         // Close the fd
         pclose(status_cmd);
 
         // Remove newline if present
-        elements->status[strcspn(elements->status, "\n")] = '\0';
+        element->status[strcspn(element->status, "\n")] = '\0';
 }
 
 int poll(unsigned long time)
@@ -65,12 +66,17 @@ void draw()
 {
         // Draw the bar with pure printf's
         for (int i = 0; i < elements_num; ++i) {
+                // Ignore empty status
+                if (strlen(elements[i].status) == 0)
+                        continue;
+
+                // Print delimeter for every element
+                // except the first one
+                if (i != 0)
+                        printf("%s", delim);
+
                 printf("%s", elements[i].status);
 
-                // Don't draw delimiter on last element
-                if (i + 1 == elements_num)
-                        break;
-                printf("%s", delim);
         }
 
         // Final printf to "send" out the full statusbar
