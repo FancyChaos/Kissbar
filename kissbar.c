@@ -2,34 +2,54 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <X11/Xlib.h>
 // defines Element, elements, delim, elements_num, SSIZE
 #include "kissbar.h"
+
+// Function definitions
+void getstatus(Element*);
+int update_elements(unsigned long);
+void draw();
+void setupX();
+void usage(char*);
 
 // Total number of scripts
 const int elements_num = sizeof(elements)/sizeof(Element);
 
-void getstatus(Element *element)
+// Determines the output destination of the statusbar
+char tostdout = 0;
+char towin = 0;
+
+// X11 variables
+Display *dpy;
+Window root;
+
+// Full statusbar text
+char *statusbar_text;
+
+void
+getstatus(Element *element)
 {
         // Execute statusbar script/command
         FILE *status_cmd = popen(element->cmd, "r");
         if (status_cmd == NULL) {
-                strlcpy(element->status, "Could not execute command", SSIZE);
-                return;
+                fprintf(stderr, "Kissbar: Could not execute command/script: %s\n", element->cmd);
+                exit(3);
         }
 
         // Get return value of the script/command
         if(fgets(element->status, SSIZE, status_cmd) == NULL)
                 element->status[0] = '\0';
 
-        // Close the fd
-        pclose(status_cmd);
-
         // Remove newline if present
         element->status[strcspn(element->status, "\n")] = '\0';
+
+        // Close the fd
+        pclose(status_cmd);
 }
 
-int poll(unsigned long time)
+int
+update_elements(unsigned long time)
 {
         // Signal to redraw the bar
         int redraw = 0;
@@ -62,9 +82,13 @@ int poll(unsigned long time)
         return redraw;
 }
 
-void draw()
+void
+draw()
 {
-        // Draw the bar with pure printf's
+        // "clear" the statusbar text
+        statusbar_text[0] = '\0';
+
+        // Form full statusbar text from all elements
         for (int i = 0; i < elements_num; ++i) {
                 // Ignore empty status
                 if (strlen(elements[i].status) == 0)
@@ -72,27 +96,77 @@ void draw()
 
                 // Print delimeter for every element
                 // except the first one
-                if (i != 0)
-                        printf("%s", delim);
-
-                printf("%s", elements[i].status);
-
+                if (strlen(statusbar_text) == 0)
+                        strlcpy(statusbar_text, elements[i].status, SSIZE);
+                else
+                        sprintf(statusbar_text, "%s%s%s", statusbar_text, delim, elements[i].status);
         }
 
-        // Final printf to "send" out the full statusbar
-        printf("\n");
-        fflush(stdout);
+        // Add newline
+        strcat(statusbar_text, "\n");
+
+        if (tostdout) {
+                // Final printf to "send" out the full statusbar
+                printf("%s", statusbar_text);
+                fflush(stdout);
+        }
+
+        if (towin) {
+                XStoreName(dpy, root, statusbar_text);
+                XFlush(dpy);
+        }
+
 }
 
-int main()
+void
+setupX()
 {
+        dpy = XOpenDisplay(NULL);
+        if(!dpy) {
+                fprintf(stderr, "Kissbar: Could not open X11 display\n");
+                exit(2);
+        }
+        root = RootWindow(dpy, DefaultScreen(dpy));
+}
+
+void
+usage(char *name)
+{
+    fprintf(stderr, "Usage: %s [-ow]\n", name);
+    exit(1);
+}
+
+int
+main(int argc, char **argv)
+{
+        // Parse arguments
+        int opt;
+        while((opt = getopt(argc, argv, "ow")) != -1) {
+                switch(opt) {
+                        case 'o': tostdout = 1; break;
+                        case 'w': towin = 1; break;
+                        default: usage(argv[0]);
+                }
+        }
+
+        // We expect at least one output mode
+        if (!tostdout && !towin)
+                usage(argv[0]);
+
+        if (towin)
+                setupX();
+
+        // Allocate enough space for the whole statusbar text
+        statusbar_text = (char*) malloc((SSIZE * elements_num) + (strlen(delim) * elements_num));
+
+        // Important variables for main loop
         const unsigned int polling_rate = 1;
         unsigned long time = 0;
         int redraw = 0;
 
         while (1) {
                 // Poll all elements of the bar
-                redraw = poll(time);
+                redraw = update_elements(time);
 
                 // Redraw if an elements status changed
                 if (redraw)
@@ -102,6 +176,9 @@ int main()
                 time += polling_rate;
                 sleep(polling_rate);
         }
+
+        if (towin)
+                XCloseDisplay(dpy);
 
         return 0;
 }

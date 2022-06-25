@@ -1,13 +1,14 @@
 INSTALLDIR	:= /usr/local/bin
 CC		:= cc
 
+
 all: kissbar
 
 kissbar: kissbar.o
-	${CC} kissbar.o -o kissbar
+	${CC} kissbar.o -o kissbar -L/usr/X11R6/lib -lX11
 
 kissbar.o: kissbar.c kissbar.h
-	cc -c kissbar.c
+	cc -I/usr/X11R6/include -c kissbar.c
 
 install: kissbar
 	mkdir -p ${INSTALLDIR}
