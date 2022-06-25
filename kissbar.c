@@ -13,6 +13,13 @@ void draw();
 void setupX();
 void usage(char*);
 
+// X11 variables
+Display *dpy;
+Window root;
+
+// Full statusbar text
+char *statusbar_text;
+
 // Total number of scripts
 const int elements_num = sizeof(elements)/sizeof(Element);
 
@@ -20,12 +27,9 @@ const int elements_num = sizeof(elements)/sizeof(Element);
 char tostdout = 0;
 char towin = 0;
 
-// X11 variables
-Display *dpy;
-Window root;
+// Options
+char nonweline = 0;
 
-// Full statusbar text
-char *statusbar_text;
 
 void
 getstatus(Element *element)
@@ -103,7 +107,8 @@ draw()
         }
 
         // Add newline
-        strcat(statusbar_text, "\n");
+        if(!nonweline)
+                strcat(statusbar_text, "\n");
 
         if (tostdout) {
                 // Final printf to "send" out the full statusbar
@@ -132,7 +137,7 @@ setupX()
 void
 usage(char *name)
 {
-    fprintf(stderr, "Usage: %s [-ow]\n", name);
+    fprintf(stderr, "Usage: %s [-own]\n", name);
     exit(1);
 }
 
@@ -141,10 +146,11 @@ main(int argc, char **argv)
 {
         // Parse arguments
         int opt;
-        while((opt = getopt(argc, argv, "ow")) != -1) {
+        while((opt = getopt(argc, argv, "own")) != -1) {
                 switch(opt) {
                         case 'o': tostdout = 1; break;
                         case 'w': towin = 1; break;
+                        case 'n': nonweline = 1; break;
                         default: usage(argv[0]);
                 }
         }
