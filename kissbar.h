@@ -9,7 +9,7 @@ enum { SSIZE = 128 };
 // DO NOT TOUCH
 typedef struct {
         char *cmd;
-        int interval;
+        unsigned long interval;
         char status[SSIZE];
 } Element;
 

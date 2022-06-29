@@ -1,24 +1,22 @@
-INSTALLDIR	:= /usr/local/bin
-CC		:= cc
-
+include config.mk
 
 all: kissbar
 
 kissbar: kissbar.o
-	${CC} kissbar.o -o kissbar -L/usr/X11R6/lib -lX11
+	$(CC) kissbar.o -o kissbar $(LIBS)
 
 kissbar.o: kissbar.c kissbar.h
-	cc -I/usr/X11R6/include -c kissbar.c
+	$(CC) -c kissbar.c $(CFLAGS)
 
 install: kissbar
-	mkdir -p ${INSTALLDIR}
-	cp -f kissbar ${INSTALLDIR}
-	chmod 755 ${INSTALLDIR}/kissbar
+	mkdir -p $(DESTDIR)$(PREFIX)/bin
+	cp kissbar $(DESTDIR)$(PREFIX)/bin
+	chmod 755 $(DESTDIR)$(PREFIX)/bin/kissbar
 
 uninstall:
-	rm -f ${INSTALLDIR}/kissbar
+	rm -rf $(DESTDIR)$(PREFIX)/bin/kissbar
 
 clean:
-	rm -rf *.o kissbar
+	rm -f *.o kissbar
 
-.PHONY: all clean install uninstall
+.PHONY: all install uninstall clean
