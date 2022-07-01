@@ -155,9 +155,9 @@ main(int argc, char **argv)
                 }
         }
 
-        // We expect at least one output mode
-        if (!tostdout && !towin)
-                usage(argv[0]);
+        // Print to stdout by default except only -w (xsetroot) option is given
+        if (!towin)
+                tostdout = 1;
 
         if (towin)
                 setupX();
