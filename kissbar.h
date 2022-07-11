@@ -19,6 +19,7 @@ typedef struct {
 // The lowest interval possible is '1' = The script gets called every second.
 Element elements[] = {
         { .cmd = "/etc/fos/statusbar/sb-cpu",           .interval = 2},
+        { .cmd = "/etc/fos/statusbar/sb-mem",           .interval = 3},
         { .cmd = "/etc/fos/statusbar/sb-cpuspeed",      .interval = 5},
         { .cmd = "/etc/fos/statusbar/sb-battery",       .interval = 5},
         { .cmd = "/etc/fos/statusbar/sb-clock",         .interval = 10}
