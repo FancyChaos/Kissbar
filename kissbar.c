@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
+#include <bsd/string.h>
+#endif
 #include <unistd.h>
 #include <X11/Xlib.h>
 // defines Element, elements, delim, elements_num, SSIZE
