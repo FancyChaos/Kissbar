@@ -1,11 +1,2 @@
-PREFIX = /usr/local
-
-X11INC = /usr/X11R6/include
-X11LIB = /usr/X11R6/lib
-
-INCS = -I$(X11INC)
-LIBS = -L$(X11LIB) -lX11 -lbsd
-
-CFLAGS = -std=c99 -D_POSIX_C_SOURCE=200809L -Wall -pedantic -Wconversion -O3 $(INCS)
-
-CC = cc
+LIBS += -lbsd
+CFLAGS += -D_POSIX_C_SOURCE=200809L
