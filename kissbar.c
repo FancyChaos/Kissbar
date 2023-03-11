@@ -1,20 +1,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <unistd.h>
+#include <X11/Xlib.h>
 #ifdef __linux__
 #include <bsd/string.h>
 #endif
-#include <unistd.h>
-#include <X11/Xlib.h>
-// defines Element, elements, delim, elements_num, SSIZE
-#include "kissbar.h"
 
-// Function definitions
-void getstatus(Element*);
-int update_elements(unsigned long);
-void draw();
-void setupX();
-void usage(char*);
+// Maximum size of the status message from one element (script)
+enum { SSIZE = 64 };
+
+// Datastructure for one element (script)
+typedef struct {
+        char *cmd;
+        unsigned long interval;
+        char status[SSIZE];
+} Element;
 
 // X11 variables
 Display *dpy;
@@ -22,20 +25,32 @@ Window root;
 
 // Full statusbar text
 char *statusbar_text;
-
-// Total number of scripts
-const int elements_num = sizeof(elements)/sizeof(Element);
-
-// Determines the output destination of the statusbar
-char tostdout = 0;
-char towin = 0;
+// Largest possible size of statusbar (init in main)
+size_t statusbar_len = 0;
 
 // Options
-char nonweline = 0;
+// Add newline to the output
+bool newline = 0;
+// Determines the output destination of the statusbar
+bool tostdout = 0;
+bool towin = 0;
+
+// Defines custom elements
+#include "kissbar.h"
+// Total number of elements (scripts)
+const size_t elements_num = sizeof(elements)/sizeof(Element);
+
+// Function definitions
+void  update_status(Element*);
+bool  update_elements(uint64_t);
+void  output();
+void  setup_X();
+int   ignore_X_error(Display*, XErrorEvent*);
+void  usage(char*);
 
 
 void
-getstatus(Element *element)
+update_status(Element *element)
 {
         // Execute statusbar script/command
         FILE *status_cmd = popen(element->cmd, "r");
@@ -55,42 +70,38 @@ getstatus(Element *element)
         pclose(status_cmd);
 }
 
-int
-update_elements(unsigned long time)
+bool
+update_elements(uint64_t cycle)
 {
-        // Signal to redraw the bar
-        int redraw = 0;
+        // Signal to output the changed statusbar
+        bool changed = false;
 
         // Store old status of every element to redraw the bar
         // if the status changed
         char prev_status[SSIZE];
 
-        Element *element;
         for (int i = 0; i < elements_num; ++i) {
-                element = elements + i;
-
-                // Do nothing if the interval is set and
-                // the interval is not reached yet
-                if (element->interval && time % element->interval)
+                // Only pull new status ever n cycles
+                if (elements[i].interval && cycle % elements[i].interval)
                         continue;
 
                 // Copy the current status to a buffer
-                strlcpy(prev_status, element->status, SSIZE);
+                strlcpy(prev_status, elements[i].status, SSIZE);
 
-                // Get and set the current status of the element
-                getstatus(element);
+                // Update status of current element
+                update_status(elements + i);
 
                 // If the previous status differs from the current
-                // we will redraw
-                if (strncmp(element->status, prev_status, SSIZE))
-                        redraw = 1;
+                // we will re-output the statusbar
+                if (strncmp(elements[i].status, prev_status, SSIZE))
+                        changed = true;
         }
 
-        return redraw;
+        return changed;
 }
 
 void
-draw()
+output()
 {
         // "clear" the statusbar text
         statusbar_text[0] = '\0';
@@ -98,23 +109,24 @@ draw()
         // Form full statusbar text from all elements
         for (int i = 0; i < elements_num; ++i) {
                 // Ignore empty status
-                if (strlen(elements[i].status) == 0)
+                if (strnlen(elements[i].status, SSIZE) == 0)
                         continue;
 
-                // Print delimeter for every element
-                // except the first one
-                if (strlen(statusbar_text) == 0)
+                // Copy the first elements status straight to the statusbar
+                if (statusbar_text[0] == '\0') {
                         strlcpy(statusbar_text, elements[i].status, SSIZE);
-                else
-                        sprintf(statusbar_text, "%s%s%s", statusbar_text, delim, elements[i].status);
+                        continue;
+                }
+                
+                // Copy delimiter and next elements status the the statusbar
+                strlcat(statusbar_text, delim, statusbar_len);
+                strlcat(statusbar_text, elements[i].status, statusbar_len);
         }
 
         // Add newline
-        if(!nonweline)
-                strcat(statusbar_text, "\n");
+        if (newline) strcat(statusbar_text, "\n");
 
         if (tostdout) {
-                // Final printf to "send" out the full statusbar
                 printf("%s", statusbar_text);
                 fflush(stdout);
         }
@@ -123,25 +135,36 @@ draw()
                 XStoreName(dpy, root, statusbar_text);
                 XFlush(dpy);
         }
+}
 
+int
+ignore_X_error(Display *dpy, XErrorEvent *ee)
+{
+        char error[256] = {0};
+        XGetErrorText(dpy, ee->error_code, error, 128);
+        fprintf(stderr,
+                "Kissbar: Encountered unexpected X error: %s\n",
+                error);
+        return 0;
 }
 
 void
-setupX()
+setup_X()
 {
-        dpy = XOpenDisplay(NULL);
-        if(!dpy) {
+        if (!(dpy = XOpenDisplay(NULL))) {
                 fprintf(stderr, "Kissbar: Could not open X11 display\n");
                 exit(2);
         }
-        root = RootWindow(dpy, DefaultScreen(dpy));
+        root = DefaultRootWindow(dpy);
+        XSetErrorHandler(ignore_X_error);
+        XSync(dpy, 0);
 }
 
 void
 usage(char *name)
 {
-    fprintf(stderr, "Usage: %s [-own]\n", name);
-    exit(1);
+        fprintf(stderr, "Usage: %s [-own]\n", name);
+        exit(1);
 }
 
 int
@@ -149,45 +172,34 @@ main(int argc, char **argv)
 {
         // Parse arguments
         int opt;
-        while((opt = getopt(argc, argv, "own")) != -1) {
+        while ((opt = getopt(argc, argv, "own")) != -1) {
                 switch(opt) {
-                        case 'o': tostdout = 1; break;
-                        case 'w': towin = 1; break;
-                        case 'n': nonweline = 1; break;
+                        case 'o': tostdout = true; break;
+                        case 'w': towin = true; break;
+                        case 'n': newline = true; break;
                         default: usage(argv[0]);
                 }
         }
 
         // Print to stdout by default except only -w (xsetroot) option is given
-        if (!towin)
-                tostdout = 1;
-
-        if (towin)
-                setupX();
+        if (!towin) tostdout = 1;
+        else setup_X();
 
         // Allocate enough space for the whole statusbar text
-        statusbar_text = (char*) malloc((SSIZE * elements_num) + (strlen(delim) * elements_num));
+        statusbar_len = (SSIZE * elements_num) +
+                        (strlen(delim) * (elements_num - 1)) + 1;
+        statusbar_text = (char*) malloc(statusbar_len);
 
-        // Important variables for main loop
-        const unsigned int polling_rate = 1;
-        unsigned long time = 0;
-        int redraw = 0;
-
+        uint64_t cycle = 0;
         while (1) {
-                // Poll all elements of the bar
-                redraw = update_elements(time);
+                // Output statusbar if an elements status changed
+                if (update_elements(cycle++)) output();
 
-                // Redraw if an elements status changed
-                if (redraw)
-                        draw();
-
-                // Take a break;
-                time += polling_rate;
-                sleep(polling_rate);
+                // Checking for updates every second
+                sleep(1);
         }
 
-        if (towin)
-                XCloseDisplay(dpy);
+        if (towin) XCloseDisplay(dpy);
 
         return 0;
 }
