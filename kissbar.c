@@ -12,21 +12,23 @@
 // Maximum size of the status message from one element (script)
 enum { SSIZE = 64 };
 
-// Datastructure for one element (script)
+// One Element (script) of the Statusbar
 typedef struct {
         char *cmd;
         unsigned long interval;
         char status[SSIZE];
 } Element;
 
+// The complete Statusbar
+typedef struct {
+        char *text;
+        size_t text_len;
+        uint32_t update_cycle;
+} Statusbar;
+
 // X11 variables
 Display *dpy;
 Window root;
-
-// Full statusbar text
-char *statusbar_text;
-// Largest possible size of statusbar (init in main)
-size_t statusbar_len = 0;
 
 // Options
 // Add newline to the output
@@ -41,16 +43,17 @@ bool towin = 0;
 const size_t elements_num = sizeof(elements)/sizeof(Element);
 
 // Function definitions
-void  update_status(Element*);
-bool  update_elements(uint64_t);
-void  output();
-void  setup_X();
+void  element_update(Element*);
+bool  statusbar_update(Statusbar*);
+void  statusbar_build(Statusbar*);
+void  statusbar_output(Statusbar*);
+void  setup_X(void);
 int   ignore_X_error(Display*, XErrorEvent*);
 void  usage(char*);
 
 
 void
-update_status(Element *element)
+element_update(Element *element)
 {
         // Execute statusbar script/command
         FILE *status_cmd = popen(element->cmd, "r");
@@ -60,7 +63,7 @@ update_status(Element *element)
         }
 
         // Get return value of the script/command
-        if(fgets(element->status, SSIZE, status_cmd) == NULL)
+        if (fgets(element->status, SSIZE, status_cmd) == NULL)
                 element->status[0] = '\0';
 
         // Remove newline if present
@@ -71,68 +74,77 @@ update_status(Element *element)
 }
 
 bool
-update_elements(uint64_t cycle)
+statusbar_update(Statusbar *statusbar)
 {
-        // Signal to output the changed statusbar
+        // Returned and set to true when an element status updated
         bool changed = false;
 
-        // Store old status of every element to redraw the bar
-        // if the status changed
+        // Store old status of every element to determine an update
         char prev_status[SSIZE];
 
         for (int i = 0; i < elements_num; ++i) {
                 // Only pull new status ever n cycles
-                if (elements[i].interval && cycle % elements[i].interval)
+                if (elements[i].interval &&
+                    statusbar->update_cycle % elements[i].interval)
                         continue;
 
                 // Copy the current status to a buffer
                 strlcpy(prev_status, elements[i].status, SSIZE);
 
                 // Update status of current element
-                update_status(elements + i);
+                element_update(elements + i);
 
                 // If the previous status differs from the current
-                // we will re-output the statusbar
+                // we will set the return value changed to true
                 if (strncmp(elements[i].status, prev_status, SSIZE))
                         changed = true;
         }
+
+        ++statusbar->update_cycle;
 
         return changed;
 }
 
 void
-output()
+statusbar_build(Statusbar *statusbar)
 {
         // "clear" the statusbar text
-        statusbar_text[0] = '\0';
+        statusbar->text[0] = '\0';
 
-        // Form full statusbar text from all elements
+        // Build full statusbar text from all elements
         for (int i = 0; i < elements_num; ++i) {
                 // Ignore empty status
                 if (strnlen(elements[i].status, SSIZE) == 0)
                         continue;
 
-                // Copy the first elements status straight to the statusbar
-                if (statusbar_text[0] == '\0') {
-                        strlcpy(statusbar_text, elements[i].status, SSIZE);
+                // Copy the first elements status to the beginning
+                if (statusbar->text[0] == '\0') {
+                        strlcpy(statusbar->text, elements[i].status, SSIZE);
                         continue;
                 }
                 
                 // Copy delimiter and next elements status the the statusbar
-                strlcat(statusbar_text, delim, statusbar_len);
-                strlcat(statusbar_text, elements[i].status, statusbar_len);
+                strlcat(statusbar->text, delim, statusbar->text_len);
+                strlcat(statusbar->text, elements[i].status, statusbar->text_len);
         }
 
         // Add newline
-        if (newline) strcat(statusbar_text, "\n");
+        if (newline) strcat(statusbar->text, "\n");
 
+        // Be sure to be nul terminated
+        statusbar->text[statusbar->text_len - 1] = '\0';
+}
+
+void
+statusbar_output(Statusbar *statusbar)
+{
         if (tostdout) {
-                printf("%s", statusbar_text);
+                printf("%s", statusbar->text);
                 fflush(stdout);
         }
 
         if (towin) {
-                XStoreName(dpy, root, statusbar_text);
+                XStoreName(dpy, root, statusbar->text);
                 XFlush(dpy);
         }
 }
@@ -140,6 +152,7 @@ output()
 int
 ignore_X_error(Display *dpy, XErrorEvent *ee)
 {
+        // Output X errors to stderr but ignore them
         char error[256] = {0};
         XGetErrorText(dpy, ee->error_code, error, 128);
         fprintf(stderr,
@@ -149,8 +162,9 @@ ignore_X_error(Display *dpy, XErrorEvent *ee)
 }
 
 void
-setup_X()
+setup_X(void)
 {
+        // Connect to X to set the root windows name
         if (!(dpy = XOpenDisplay(NULL))) {
                 fprintf(stderr, "Kissbar: Could not open X11 display\n");
                 exit(2);
@@ -180,20 +194,24 @@ main(int argc, char **argv)
                         default: usage(argv[0]);
                 }
         }
-
         // Print to stdout by default except only -w (xsetroot) option is given
         if (!towin) tostdout = 1;
         else setup_X();
 
+        // Create the statusbar
+        Statusbar *statusbar = (Statusbar*) malloc(sizeof(Statusbar));
         // Allocate enough space for the whole statusbar text
-        statusbar_len = (SSIZE * elements_num) +
-                        (strlen(delim) * (elements_num - 1)) + 1;
-        statusbar_text = (char*) malloc(statusbar_len);
+        statusbar->text_len = (SSIZE * elements_num) +
+                              (strlen(delim) * (elements_num - 1)) + 1;
+        statusbar->text = (char*) malloc(statusbar->text_len);
+        statusbar->update_cycle = 0;
 
-        uint64_t cycle = 0;
         while (1) {
-                // Output statusbar if an elements status changed
-                if (update_elements(cycle++)) output();
+                // Build and output statusbar if an elements status changed
+                if (statusbar_update(statusbar)) {
+                        statusbar_build(statusbar);
+                        statusbar_output(statusbar);
+                }
 
                 // Checking for updates every second
                 sleep(1);
